@@ -1,0 +1,8 @@
+packages:
+  - app
+  - infra
+onlyBuiltDependencies:
+  - '@cdktf/node-pty-prebuilt-multiarch'
+  - '@prisma/client'
+  - protobufjs
+  - sharp

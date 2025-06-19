@@ -1,0 +1,341 @@
+name: 1Test Question Service CI/CD
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy'
+        type: boolean
+        required: false
+        default: false
+      run-migrations:
+        description: 'Run migrations'
+        type: boolean
+        required: false
+        default: false
+      version:
+        description: 'Optional: Image version (e.g. 1.0.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    name: Lint & Test & Build
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'Production' || 'Development' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PROTO_REPO_SSH_KEY }}
+
+      - name: Fetch the protobuf files
+        run: |
+          # Special case for main branch - only clone main, no fallbackAdd commentMore actions
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "Cloning 'main' branch from proto repo (production mode - no fallback)"
+            git clone --branch main --depth 1 git@github.com:TE-System/1test-service-proto-definition.git proto
+          else
+            # For other branches, try to clone the branch with the same name first, fallback to dev if it fails
+            if ! git clone --branch ${{ github.ref_name }} --depth 1 git@github.com:TE-System/1test-service-proto-definition.git proto 2>/dev/null; then
+              echo "Branch '${{ github.ref_name }}' not found in proto repo, falling back to 'dev' branch"
+              git clone --branch dev --depth 1 git@github.com:TE-System/1test-service-proto-definition.git proto
+            else
+              echo "Successfully cloned branch '${{ github.ref_name }}' from proto repo"
+            fi
+          fi
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Download dependencies
+        run: pnpm install -r
+
+      - name: Generate the protobuf files
+        run: pnpm gen:proto
+
+      - name: Generate Prisma client
+        run: pnpm prisma:generate:app
+
+      - name: Lint
+        run: pnpm lint:app
+
+      - name: Testing
+        run: pnpm test:app
+
+      - name: Build
+        run: pnpm build:app
+
+  run-migrations:
+    name: Apply Database Migrations
+    needs: [quality-gate]
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'dev')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run-migrations == 'true')
+    environment: ${{ github.ref_name == 'main' && 'Production' || 'Development' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm --filter app install
+
+      - name: Prepare SSH Keys and Configure SSH Proxy for kubectl
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          # Write the private key for GitHub Actions runner to bastion host
+          echo "${{ secrets.BASTION_SSH_PRIVATE_KEY }}" > ~/.ssh/k8s-bastion-host-github-key
+          chmod 600 ~/.ssh/k8s-bastion-host-github-key
+
+          # Create SSH config file for bastion
+          cat <<EOF > ~/.ssh/config
+          Host bastion
+            Hostname ${{ vars.BASTION_HOST_PUBLIC_IP }}
+            User ${{ vars.BASTION_HOST_USER }}
+            IdentityFile ~/.ssh/k8s-bastion-host-github-key
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
+          chmod 600 ~/.ssh/config
+
+          # Add bastion key to ssh-agent for the current session
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/k8s-bastion-host-github-key
+
+      - name: Create SSH Tunnel for kubectl
+        run: |
+          ssh -N -L 8001:${{ vars.K8S_MASTER_1_PRIVATE_IP }}:6443 bastion &
+          echo "Waiting for SSH tunnel to establish..."
+          sleep 5
+        timeout-minutes: 1
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 --decode > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Create database port-forward tunnel
+        run: |
+          # Port forward to PostgreSQL cluster
+          kubectl port-forward -n ${{ github.ref_name == 'main' && 'prod' || 'dev' }} svc/pg-cluster-rw 5432:5432 &
+          echo "Waiting for database port-forward to establish..."
+          sleep 10
+        timeout-minutes: 2
+
+      - name: Apply Prisma migrations
+        run: |
+          cd app
+          pnpm prisma migrate deploy --schema=src/core/infrastructure/data/postgresql/prisma/schema.prisma
+        env:
+          PG_URL: ${{ secrets.PG_URL }}
+
+  build-infra:
+    name: Build infra
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'Production' || 'Development' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20 # The cdktf, node 20 or lower
+          cache: 'pnpm'
+      - name: Install
+        run: pnpm --filter infra install
+
+  deploy:
+    name: Build & push image to ECR
+    needs: [quality-gate, build-infra]
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'dev')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true')
+    environment: ${{ github.ref_name == 'main' && 'Production' || 'Development' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20 # The cdktf, node 20 or lower
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm --filter infra install
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PROTO_REPO_SSH_KEY }}
+
+      - name: Fetch the protobuf files
+        run: |
+          # Special case for main branch - only clone main, no fallbackAdd commentMore actions
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "Cloning 'main' branch from proto repo (production mode - no fallback)"
+            git clone --branch main --depth 1 git@github.com:TE-System/1test-service-proto-definition.git proto
+          else
+            # For other branches, try to clone the branch with the same name first, fallback to dev if it fails
+            if ! git clone --branch ${{ github.ref_name }} --depth 1 git@github.com:TE-System/1test-service-proto-definition.git proto 2>/dev/null; then
+              echo "Branch '${{ github.ref_name }}' not found in proto repo, falling back to 'dev' branch"
+              git clone --branch dev --depth 1 git@github.com:TE-System/1test-service-proto-definition.git proto
+            else
+              echo "Successfully cloned branch '${{ github.ref_name }}' from proto repo"
+            fi
+          fi
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Generate module and provider bindings
+        run: pnpm --filter infra run get
+
+      - name: Deploy infra
+        run: pnpm --filter infra run deploy
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          INFRA_ENV: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Amazon ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.ECR_REGISTRY }}
+          username: AWS
+          password: ${{ steps.login-ecr.outputs.password }}
+        id: login-ecr # Assign an ID to this step to access its outputs
+
+      - name: Build and push Docker image to ECR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ vars.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:${{ vars.ENV }}${{ (github.event.inputs.version && github.event.inputs.version != '') && format('-{0}', github.event.inputs.version) || '' }}
+
+  update-image:
+    name: Update deployment image
+    needs: [quality-gate, deploy, run-migrations]
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      needs.quality-gate.result == 'success' &&
+      needs.deploy.result == 'success' &&
+      (needs.run-migrations.result == 'success' || needs.run-migrations.result == 'skipped') &&
+      (
+        (github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'dev')) ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true')
+      )
+    environment: ${{ (github.ref_name == 'main' || github.event.workflow_run.head_branch == 'main') && 'Production' || 'Development' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH Keys and Configure SSH Proxy for kubectl
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          # Write the private key for GitHub Actions runner to bastion host
+          echo "${{ secrets.BASTION_SSH_PRIVATE_KEY }}" > ~/.ssh/k8s-bastion-host-github-key
+          chmod 600 ~/.ssh/k8s-bastion-host-github-key
+
+          # Create SSH config file for bastion (same as in deploy-cluster)
+          cat <<EOF > ~/.ssh/config
+          Host bastion
+            Hostname ${{ vars.BASTION_HOST_PUBLIC_IP }}
+            User ${{ vars.BASTION_HOST_USER }}
+            IdentityFile ~/.ssh/k8s-bastion-host-github-key
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
+          chmod 600 ~/.ssh/config
+
+          # Add bastion key to ssh-agent for the current session
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/k8s-bastion-host-github-key
+
+      - name: Create SSH Tunnel for kubectl
+        # Run this in the background, don't wait for it to finish.
+        run: |
+          ssh -N -L 8001:${{ vars.K8S_MASTER_1_PRIVATE_IP }}:6443 bastion &
+          echo "Waiting for SSH tunnel to establish..."
+          sleep 5 # Give the tunnel a few seconds to come up
+        timeout-minutes: 1 # Give it a reasonable timeout in case SSH fails
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          # Your KUBE_CONFIG secret MUST be configured to use https://localhost:8001
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 --decode > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Update deployment image
+        env:
+          NAMESPACE: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+        run: |
+          kubectl rollout restart deployment/onetest-question-service-deployment -n ${{ env.NAMESPACE }} && \
+          kubectl rollout status deployment/onetest-question-service-deployment -n ${{ env.NAMESPACE }} && \
+          echo "Deployment image successfully updated in namespace ${{ env.NAMESPACE }}"

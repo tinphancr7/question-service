@@ -1,0 +1,59 @@
+{
+  "name": "1test-question-service",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "build:app": "pnpm --filter app build",
+    "start:app": "pnpm --filter app start",
+    "dev:app": "pnpm --filter app dev",
+    "test:app": "pnpm --filter app test",
+    "format:app": "pnpm --filter app format",
+    "lint:app": "pnpm --filter app lint",
+    "lint:fix:app": "pnpm --filter app lint:fix",
+    "gen:proto": "pnpm --filter app gen:proto",
+    "format": "prettier . --write",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "prepare": "husky",
+    "lint:staged": "lint-staged",
+    "prisma:generate:app": "pnpm --filter app prisma:generate",
+    "prisma:migrate:app": "pnpm --filter app prisma:migrate",
+    "prisma:push:app": "pnpm --filter app prisma:push"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.7.1",
+  "devDependencies": {
+    "@babel/core": "^7.27.1",
+    "@babel/plugin-proposal-decorators": "^7.27.1",
+    "@babel/preset-typescript": "^7.27.1",
+    "@jest/globals": "^29.7.0",
+    "@trivago/prettier-plugin-sort-imports": "^5.2.2",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.15.21",
+    "@typescript-eslint/eslint-plugin": "^8.32.1",
+    "@typescript-eslint/parser": "^8.32.1",
+    "esbuild": "^0.25.4",
+    "eslint": "^9.27.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-prettier": "^5.4.0",
+    "grpc-tools": "^1.13.0",
+    "husky": "^9.1.7",
+    "jest": "^29.7.0",
+    "lint-staged": "^16.0.0",
+    "prettier": "^3.5.3",
+    "prettier-eslint": "^16.4.2",
+    "ts-jest": "^29.3.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "lint-staged": {
+    "app/src/**/*.{js,jsx,ts,tsx}": [
+      "eslint --quiet --fix --ignore-pattern \"**/protobuf/**\" --ignore-pattern \"**/generated/**\""
+    ],
+    "app/src/**/*.{json,js,ts,jsx,tsx}": [
+      "prettier --write --ignore-unknown"
+    ]
+  }
+}

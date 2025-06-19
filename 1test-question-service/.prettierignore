@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+coverage/
+*.lock
+pnpm-lock.yaml
+.git/
+.husky/
+protobuf/
+*.proto
+*.pb.ts
+*.pb.js 

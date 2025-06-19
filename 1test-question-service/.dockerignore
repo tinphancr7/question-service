@@ -1,0 +1,111 @@
+# Dependencies
+**/node_modules
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
+
+# Build outputs
+**/dist
+**/build
+**/.next
+**/out
+
+# Logs
+**/logs
+**/*.log
+
+# Runtime data
+**/pids
+**/*.pid
+**/*.seed
+**/*.pid.lock
+
+# Coverage directory used by tools like istanbul
+**/coverage
+**/.nyc_output
+
+# Environment files
+**/.env
+**/.env.local
+**/.env.development
+**/.env.test
+**/.env.production
+
+# Git
+**/.git
+**/.gitignore
+**/README.md
+
+# IDE files
+**/.vscode
+**/.idea
+**/*.swp
+**/*.swo
+**/*~
+
+# OS generated files
+**/.DS_Store
+**/.DS_Store?
+**/._*
+**/.Spotlight-V100
+**/.Trashes
+**/ehthumbs.db
+**/Thumbs.db
+
+# Testing files and directories (be specific to avoid excluding business logic)
+**/__tests__
+**/*.test.js
+**/*.test.ts
+**/*.spec.js
+**/*.spec.ts
+**/jest.config.*
+**/*.test.tsx
+**/*.spec.tsx
+
+# Development tools
+**/.husky
+**/nodemon.json
+**/.eslintrc*
+**/.prettierrc*
+**/prettier.config.*
+**/.prettierignore
+**/eslint.config.*
+**/.babelrc*
+**/babel.config.*
+
+# Docker files (avoid recursion)
+**/Dockerfile*
+**/docker-compose*
+**/.dockerignore
+
+# Local development
+**/local
+**/tmp
+**/temp
+
+# Documentation
+**/docs
+**/*.md
+
+# Infra and deployment files
+**/infra
+**/.terraform
+**/*.tfstate
+**/*.tfplan
+
+# AWS credentials (security)
+**/certs
+**/*.pem
+**/*.key
+**/*.crt
+
+# Archive files
+**/*.tar.gz
+**/*.zip
+**/*.rar
+
+# Explicitly include needed files
+!package.json
+!pnpm-workspace.yaml
+!pnpm-lock.yaml 

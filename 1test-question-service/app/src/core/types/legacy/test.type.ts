@@ -1,0 +1,21 @@
+export enum TestStatus {
+  PENDING_PRIVATE = 'PENDING_PRIVATE',
+  PENDING_PUBLIC = 'PENDING_PUBLIC',
+  PRIVATE = 'PRIVATE',
+  PUBLIC = 'PUBLIC',
+}
+
+export enum TestCreatorRole {
+  ADMIN = 'admin',
+  PROVIDER = 'provider',
+  TEACHER = 'teacher',
+  ACADEMY = 'academy',
+}
+
+export enum TestSpecialCategory {
+  ELEMENTARY_SCHOOL_TEST = 'ELEMENTARY_SCHOOL_TEST',
+  JUNIOR_HIGH_SCHOOL_TEST = 'JUNIOR_HIGH_SCHOOL_TEST',
+  HIGH_SCHOOL_TEST = 'HIGH_SCHOOL_TEST',
+  HIGHER_EDUCATION_TEST = 'HIGHER_EDUCATION_TEST',
+  MOCK_TEST = 'MOCK_TEST',
+}
